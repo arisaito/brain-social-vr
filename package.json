@@ -1,11 +1,11 @@
 {
-  "name": "networked-aframe",
-  "version": "0.8.2",
-  "description": "A web framework for building multi-user virtual reality experiences.",
+  "name": "brain-social-vr",
+  "version": "1.0.0",
+  "description": "",
   "homepage": "",
   "main": "src/index.js",
   "author": "Hayden Lee <haydenjameslee@gmail.com>",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "bugs": {
     "url": "https://github.com/networked-aframe/networked-aframe/issues"
   },
