@@ -1,155 +1,111 @@
-const PP = POSTPROCESSING;
+import * as THREE from "https://threejsfundamentals.org/threejs/resources/threejs/r127/build/three.module.js";
+import { EffectComposer } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/postprocessing/RenderPass.js";
+import { BloomPass } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/postprocessing/BloomPass.js";
+// import { FilmPass } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/postprocessing/FilmPass.js";
+import { ShaderPass } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/postprocessing/ShaderPass.js";
+import { PixelShader } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/shaders/PixelShader.js";
+import { HalftonePass } from "https://threejsfundamentals.org/threejs/resources/threejs/r127/examples/jsm/postprocessing/HalftonePass.js";
 
-const postprocessingSystem = {
-  assets: null,
-  composer: null,
-  originalRenderMethod: null,
+let aScene = null;
 
-  /**
-   * Sets the preloaded scene assets.
-   *
-   * @param {Map} assets - A collection of scene assets.
-   * @return {Object} This system.
-   */
+let sceneEl = null;
+let scene = null;
+let renderer = null;
+let composer = null;
 
-  setAssets(assets) {
-    this.assets = assets;
-    return this;
+let initGetRenderer = null;
+
+AFRAME.registerSystem("effects", {
+  init: function () {
+    aScene = this;
+    initGetRenderer = new Promise((resolve) => {
+      sceneEl = this.sceneEl;
+      sceneEl.addEventListener("loaded", () => {
+        renderer = sceneEl.renderer;
+        resolve();
+      });
+    });
   },
 
   /**
-   * Initializes this system.
+   * Record the timestamp for the current frame.
+   * @param {number} t
+   * @param {number} dt
    */
+  tick: function (t, dt) {
+    this.t = t;
+    this.dt = dt;
+  },
 
-  init() {
-    const sceneEl = this.sceneEl;
-
-    const scene = sceneEl.object3D;
-    const renderer = sceneEl.renderer;
+  /**
+   * Binds the EffectComposer to the A-Frame render loop.
+   * (This is the hacky bit.)
+   */
+  bind: function () {
     const render = renderer.render;
-    const camera = sceneEl.camera;
-
-    const assets = this.assets;
-    const clock = new THREE.Clock();
-    const composer = new PP.EffectComposer(renderer);
-
-    this.composer = composer;
-    this.originalRenderMethod = render;
-
-    const smaaEffect = new PP.SMAAEffect(
-      assets.get("smaa-search"),
-      assets.get("smaa-area")
-    );
-    // noise
-    const noiseEffect = new PP.NoiseEffect();
-    const sepiaEffect = new PP.SepiaEffect();
-    const vignetteEffect = new PP.VignetteEffect();
-
-    // outline
-    const outlineEffect = new PP.OutlineEffect(scene, camera, {
-      blendFunction: PP.BlendFunction.ALPHA,
-      edgeStrength: 0.0,
-      pulseSpeed: 0.0,
-      resolutionScale: 5.75,
-      visibleEdgeColor: 0x000000,
-      hiddenEdgeColor: 0x666666,
-      blur: true,
-      xRay: true,
-    });
-
-    noiseEffect.blendMode.opacity.value = 0.6;
-    sepiaEffect.blendMode.opacity.value = 0.0;
-
-    const renderPass = new PP.RenderPass(scene, camera);
-    const effectPass = new PP.EffectPass(camera, outlineEffect);
-    const smaaPass = new PP.EffectPass(
-      camera,
-      smaaEffect,
-      noiseEffect,
-      sepiaEffect,
-      vignetteEffect
-    );
-
-    smaaPass.renderToScreen = true;
-
-    composer.addPass(renderPass);
-    composer.addPass(effectPass);
-    composer.addPass(smaaPass);
-
-    const sphere = document.querySelector("#sphere").object3D;
-    const box = document.querySelector("#box").object3D;
-    outlineEffect.setSelection(sphere.children.concat(box.children));
-
-    // Hijack the render method.
-    let calledByComposer = false;
+    const system = this;
+    let isDigest = false;
 
     renderer.render = function () {
-      if (calledByComposer) {
-        render.apply(renderer, arguments);
+      if (isDigest) {
+        render.apply(this, arguments);
       } else {
-        calledByComposer = true;
-        composer.render(clock.getDelta());
-        calledByComposer = false;
+        isDigest = true;
+        system.composer.render(system.dt);
+        isDigest = false;
       }
     };
   },
+});
 
-  /**
-   * Clean up when the system gets removed.
-   */
+initGetRenderer.then(() => {
+  scene = sceneEl.object3D;
+  const renderer = sceneEl.renderer;
+  const camera = sceneEl.camera;
 
-  remove() {
-    this.composer.renderer.render = this.originalRenderMethod;
-    this.composer.dispose();
-  },
-};
+  composer = new EffectComposer(renderer);
+  const pass1 = new RenderPass(scene, camera);
+  const pass2 = new BloomPass(1, 25, 4, 256);
+  // pass2.renderToScreen = true;
+  const halftoneParams = {
+    shape: 1,
+    radius: 4,
+    rotateR: Math.PI / 12,
+    rotateB: (Math.PI / 12) * 2,
+    rotateG: (Math.PI / 12) * 3,
+    scatter: 0,
+    blending: 1,
+    blendingMode: 1,
+    greyscale: false,
+    disable: false,
+  };
+  const pass3 = new HalftonePass(
+    window.innerWidth,
+    window.innerHeight,
+    halftoneParams
+  );
+  pass3.renderToScreen = true;
 
-/**
- * Loads scene assets.
- *
- * @return {Promise} A promise that will be fulfilled as soon as all assets have been loaded.
- */
+  const pass4 = new ShaderPass(PixelShader);
+  const PixelParams = {
+    pixelSize: 2,
+    postprocessing: true,
+  };
+  pass4.uniforms["pixelSize"].value = PixelParams.pixelSize;
+  pass4.uniforms["resolution"].value = new THREE.Vector2(
+    window.innerWidth,
+    window.innerHeight
+  );
+  pass4.uniforms["resolution"].value.multiplyScalar(window.devicePixelRatio);
 
-function load() {
-  const assets = new Map();
-  const loadingManager = new THREE.LoadingManager();
+  composer.addPass(pass1);
+  composer.addPass(pass3);
+  composer.addPass(pass4);
 
-  return new Promise((resolve, reject) => {
-    let image;
+  aScene.composer = composer;
+  aScene.t = 0;
+  aScene.dt = 0;
 
-    loadingManager.onError = reject;
-    loadingManager.onProgress = (item, loaded, total) => {
-      if (loaded === total) {
-        resolve(assets);
-      }
-    };
-
-    // Load the SMAA images.
-    image = new Image();
-    image.addEventListener("load", function () {
-      assets.set("smaa-search", this);
-      loadingManager.itemEnd("smaa-search");
-    });
-
-    loadingManager.itemStart("smaa-search");
-    image.src = PP.SMAAEffect.searchImageDataURL;
-
-    image = new Image();
-    image.addEventListener("load", function () {
-      assets.set("smaa-area", this);
-      loadingManager.itemEnd("smaa-area");
-    });
-
-    loadingManager.itemStart("smaa-area");
-    image.src = PP.SMAAEffect.areaImageDataURL;
-  });
-}
-
-load()
-  .then((assets) => {
-    AFRAME.registerSystem(
-      "postprocessing",
-      postprocessingSystem.setAssets(assets)
-    );
-  })
-  .catch(console.error);
+  aScene.bind();
+});
